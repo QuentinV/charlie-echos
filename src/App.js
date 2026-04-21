@@ -1,6 +1,9 @@
 import React, { useState } from "react";
-import { ESPLoader, Transport } from "esptool-js";
+import * as esptooljs from "esptool-js";
 import { DEVICE_DATA } from "./firmwares";
+
+const ESPLoader = esptooljs.ESPLoader;
+const Transport = esptooljs.Transport;
 
 const colors = {
   bg: "#000000",
@@ -10,7 +13,6 @@ const colors = {
   border: "#333333",
 };
 
-// Icons (Standard 32px)
 const IconUSB = () => (
   <svg
     width="32"
@@ -67,7 +69,6 @@ function App() {
   const [status, setStatus] = useState("SYSTEM READY");
   const [isFlashing, setIsFlashing] = useState(false);
 
-  // Update selected firmware when device type changes
   const handleDeviceChange = (e) => {
     const type = e.target.value;
     setDeviceType(type);
@@ -78,19 +79,51 @@ function App() {
     try {
       setIsFlashing(true);
       setStatus("INITIALIZING SERIAL...");
+
       const device = await navigator.serial.requestPort();
       const transport = new Transport(device);
-      const esploader = new ESPLoader(transport, 115200, null);
 
-      await esploader.main_fn();
-      setStatus(`DOWNLOADING ${deviceType} BINARY...`);
-      const response = await fetch(selectedFirmware);
-      const contents = await response.arrayBuffer();
+      const robustTerminal = {
+        log: (msg) => console.log(msg),
+        write: (msg) => console.log(msg),
+        writeLine: (msg) => console.log(msg),
+        info: (msg) => console.info(msg),
+        error: (msg) => console.error(msg),
+        clean: () => console.clear(),
+      };
 
-      setStatus("WRITING TO FLASH...");
-      await esploader.write_flash({
-        fileArray: [{ data: new Uint8Array(contents), address: 0x0 }],
-        flash_size: "keep",
+      setStatus("CONNECTING TO CHIP...");
+
+      const esploader = new ESPLoader({
+        transport: transport,
+        baudrate: 115200,
+        terminal: robustTerminal,
+      });
+
+      await esploader.main();
+
+      const firmwareParts = [
+        { path: "bootloader.bin", address: 0x0 },
+        { path: "partitions.bin", address: 0x8000 },
+        { path: "firmware.bin", address: 0x10000 },
+      ];
+
+      setStatus(`FETCHING BINARY...`);
+      const fileArray = [];
+      for (const part of firmwareParts) {
+        setStatus(`FETCHING ${part.path}...`);
+        const res = await fetch(
+          `${process.env.PUBLIC_URL}/firmwares/${selectedFirmware}/${part.path}`,
+        );
+        const blob = await res.arrayBuffer();
+        fileArray.push({ data: new Uint8Array(blob), address: part.address });
+      }
+
+      setStatus("FLASHING ALL PARTS...");
+      await esploader.writeFlash({
+        fileArray: fileArray,
+        flashSize: "keep",
+        compress: true,
         reportProgress: (fileIndex, written, total) => {
           setProgress(Math.round((written / total) * 100));
         },
@@ -99,7 +132,8 @@ function App() {
       setStatus("FLASH SUCCESSFUL");
       await transport.disconnect();
     } catch (err) {
-      setStatus(`ERROR: ${err.message.toUpperCase()}`);
+      console.error("Flash Error:", err);
+      setStatus(`ERROR: ${err.message?.toUpperCase() || "CONNECTION FAILED"}`);
     } finally {
       setIsFlashing(false);
     }
@@ -152,8 +186,7 @@ function App() {
             <div>
               <div style={labelStyle}>STEP 01</div>
               <p style={{ margin: 0, fontSize: "0.95rem" }}>
-                Plug your ESP32-S3 into the USB port and ensure it is in
-                download mode (hold BOOT while connecting).
+                Plug your Charlie Echo into the USB port.
               </p>
             </div>
           </div>
@@ -284,7 +317,6 @@ function App() {
   );
 }
 
-// Styling (Kept large and bold)
 const stepCardStyle = {
   display: "flex",
   alignItems: "center",
