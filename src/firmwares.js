@@ -1,7 +1,7 @@
 const firmwares = {
   "echo-zero-screen": [
     {
-      v: "1.2",
+      v: "1.3",
       date: "2026-04-26",
     },
     {
@@ -11,7 +11,7 @@ const firmwares = {
   ],
   "echo-zero": [
     {
-      v: "1.2",
+      v: "1.3",
       date: "2026-04-26",
     },
     {
